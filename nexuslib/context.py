@@ -5,7 +5,7 @@ from urllib import parse
 from nexuslib.pycurlconnection import PyCyrlConnection, CurlDebugType
 import re
 
-netloc_re = re.compile('(?P<host>[^:]+)(?::(?P<port>\d+))?')
+
 class ConfigurationError(Exception):
     def __init__(self, value):
         super(ConfigurationError, self).__init__(value)
@@ -16,15 +16,22 @@ class ConfigurationError(Exception):
 
 
 class Context(object):
+
+    netloc_re = re.compile('(?P<host>[^:]+)(:(?P<port>\d+))?')
+
     # The settings that store boolean values
     boolean_options = {'connection': frozenset(['debug', 'kerberos']), 'logging': {}, 'kerberos': {}, 'ssl': frozenset(['verify_certs'])}
+
+    # The settings that store integer values
+    integer_options = {'connection': frozenset(['timeout', 'max_active']), 'logging': {}, 'kerberos': {}, 'ssl': {}}
 
     # mapping from command line options to configuration options:
     arg_options = {'debug': ['connection', 'debug'],
                    'username': ['connection', 'username'],
                    'passwordfile': ['connection', 'passwordfile'],
                    'kerberos': ['connection', 'kerberos'],
-                   'url': ['connection', 'url']}
+                   'url': ['connection', 'url'],
+                   'timeout': ['connection', 'timeout']}
 
     # default values for connection
     default_settings = {
@@ -38,6 +45,7 @@ class Context(object):
             'log': None,
             'user_agent': 'nexusupload/pycurl',
             'max_active': 10,
+            'timeout': 10,
             'scheme': 'http',
             'host': 'localhost',
             'port': 80
@@ -63,7 +71,7 @@ class Context(object):
     }
 
     def __init__(self, config_file=None, **kwargs):
-        super(Context, self).__init__()
+        super().__init__()
         self.connected = False
 
         # Check consistency of authentication setup
@@ -84,6 +92,8 @@ class Context(object):
             for k,v in config.items(section):
                 if k in Context.boolean_options[section]:
                     self.current_config[section][k] = config.getboolean(section, k)
+                elif k in Context.integer_options[section]:
+                    self.current_config[section][k] = config.getint(section, k)
                 else:
                     self.current_config[section][k] = v
 
@@ -129,7 +139,6 @@ class Context(object):
                 self.filter |= CurlDebugType[f.upper()]
 
         connect_url = parse.urlparse(self.current_config['connection']['url'])
-        print(connect_url)
         scheme = connect_url.scheme
         if scheme == 'http':
             self.current_config.pop('ssl')
@@ -143,7 +152,7 @@ class Context(object):
             raise ConfigurationError('invalid URL scheme "%s"' % scheme)
         self.current_config['connection']['scheme'] = scheme
         netloc = connect_url.netloc
-        netloc_match = netloc_re.fullmatch(netloc)
+        netloc_match = Context.netloc_re.fullmatch(netloc)
         if netloc_match is None:
             raise ConfigurationError('invalid URL netloc "%s"' % netloc)
         (host, port) = netloc_match.group('host', 'port')
@@ -164,10 +173,11 @@ class Context(object):
             self.multi_handle = None
             self.curl_perform_task = None
             max_active = self.current_config['connection']['max_active']
-        host = self.current_config['connection']['host']
-        port = self.current_config['connection']['port']
 
-        cnxprops={'multi_handle': self.multi_handle}
+        cnxprops={'timeout': self.current_config['connection']['timeout'],
+                  'host': self.current_config['connection']['host'],
+                  'port': self.current_config['connection']['port'],
+                  'url_prefix': self.current_config['connection']['url_prefix'],}
         if self.current_config['connection']['debug']:
             cnxprops.update({
                 'debug': self.current_config['connection']['debug'],
@@ -201,12 +211,11 @@ class Context(object):
             scheme='http'
 
         self.nexuscnx = PyCyrlConnection(
-            scheme=scheme, host=host, port=port, url_prefix=self.current_config['connection']['url_prefix'],
+            scheme=scheme,
             loop=self.loop, multi_handle=self.multi_handle, max_active=max_active, curl_perform_task=self.curl_perform_task,
             use_ssl=use_ssl, verify_certs=verify_certs, ssl_opts=ssl_opts,
             kerberos=with_kerberos, http_auth=http_auth,
-            debug=self.current_config['connection']['debug'], user_agent=self.current_config['connection']['user_agent']
-
+            **cnxprops
         )
         if self.curl_perform_task is None:
             self.curl_perform_task = self.nexuscnx.curl_perform_task

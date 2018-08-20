@@ -8,8 +8,10 @@ from optparse import OptionParser
 from nexuslib.context import Context, ConfigurationError
 import rpmfile
 
-rpm_re = re.compile("""^.*-([\.\d]+)(\.(rh)?el(?P<version>\d)(u\d)?)?\.(?P<arch>[^\.]+)\.rpm$""")
+
 def main():
+
+    release_re = re.compile(""".*(\.|_)(rh)?el(?P<version>\d)(u\d)?.*""")
 
     default_config = None
     if 'NEXUSCONFIG' in os.environ:
@@ -31,66 +33,62 @@ def main():
     #Extract the context options from the first level arguments
     context_args = {k: v for k, v in list(vars(options).items()) if v is not None}
     context = None
-    valid_archs=set(['src', 'x86_64', 'noarch', 'i686', 'i586', 'i386'])
     print(valid_archs)
+    valid_archs=set(['x86_64', 'noarch', 'i686', 'i586', 'i386'])
     try:
         context = Context(**context_args)
         context.connect()
-        for f in args:
-            splited = f.split(';')
-            file = splited[0]
-            if len(splited) == 2:
-                rpm_name = basename(splited[1])
-            else:
-                rpm_name = basename(file)
+        for rpm_file_name in args:
             try:
-                with rpmfile.open(file) as rpm:
-                    # Inspect the RPM headers print rpm.headers.keys()
-                    arch = rpm.headers.pop('arch', None).decode('us-ascii')
-                    name = rpm.headers.pop('name', None).decode('us-ascii')
-                    version = rpm.headers.pop('version', None).decode('us-ascii')
-                    release = rpm.headers.pop('release', None).decode('us-ascii')
-                    # Extract a fileobject from the archive fd = rpm.extractfile(‘./usr/bin/script’) print fd.read()
-                    debuginfo = False
-                    source = False
+                with rpmfile.open(rpm_file_name) as rpm:
+                    # Returned as bytes, ensure it' a str
+                    for key in ('arch', 'release' ):
+                        if key in rpm.headers:
+                            rpm.headers[key] = rpm.headers[key].decode('us-ascii')
+                        else:
+                            rpm.headers[key] = None
+                    arch = rpm.headers.pop('arch')
+                    release = rpm.headers.pop('release')
+                    release_match = release_re.fullmatch(release)
+                    if release_match is not None:
+                        centos_version = release_match.group('version')
+                    else:
+                        centos_version = ''
                     for i in rpm.headers.pop('provides', []):
                         if '-debuginfo' in i.decode('us-ascii'):
                             debuginfo = True
                             break
+                        else:
+                            debuginfo = False
                     if 'source' in rpm.headers:
                         source = True
-                    #for k,v in rpm.headers.items():
-                    #    print(k, v)
-                    print("%s %s %s %s.%s.rpm %s %s"% (file, name, version, release, arch, debuginfo, source))
+                    else:
+                        source = False
             except Exception as e:
-                print(file, e)
-            continue
-            rpm_matcher = rpm_re.fullmatch(rpm_name, file=sys.stderr)
-            if rpm_matcher is None:
-                print('not a matching rpm: "%s", not matching' % rpm_name, file=sys.stderr)
+                print('invalid rpm "%s' % rpm_file_name, type(e), file=sys.stderr)
                 continue
-            (version, arch) = rpm_matcher.group('version', 'arch')
-            if arch is None or arch not in valid_archs:
-                print('not a matching rpm: "%s", invalid architecture %s' % (rpm_name, arch), file=sys.stderr)
-            if arch == 'src':
-                rpm_type ='sources'
+            if not source and (arch is None or arch not in valid_archs):
+                print('not a matching rpm: "%s", invalid architecture %s' % (rpm_file_name, arch), file=sys.stderr)
+            if source:
+                rpm_type ='SRPMS'
                 arch=''
-            elif '-debuginfo-' in rpm_name:
+            elif debuginfo:
                 rpm_type = 'debug'
                 arch = "/%s" % arch
             else:
-                rpm_type = 'packages'
+                rpm_type = 'Packages'
                 arch = "/%s" % arch
-            if version is None:
+            if centos_version is None:
                 versions=(5,6,7)
             else:
-                versions =(version)
+                versions = (centos_version)
             for v in versions:
-                dest = '/%s/%s%s/%s' % (rpm_type, v, arch, rpm_name)
-                print(file, dest)
+                dest = '/%s/%s%s/%s' % (rpm_type, v, arch, basename(rpm_file_name))
                 if options.doop:
-                    with open(file, 'rb') as rpm_file:
+                    with open(rpm_file_name, 'rb') as rpm_file:
                         context.perform_query(context.nexuscnx.perform_request('PUT', dest, body=rpm_file))
+                else:
+                    print(dest)
     except ConfigurationError as e:
         print(e.error_message, file=sys.stderr)
         return 253

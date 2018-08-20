@@ -11,7 +11,7 @@ import logging
 from asyncio import Future, ensure_future
 from urllib.parse import urlencode
 
-logger = logging.getLogger('eslib.pycurlconnection')
+logger = logging.getLogger('nexuslib.pycurlconnection')
 
 status_line_re = re.compile(r'HTTP\/\S+\s+\d+(\s+(?P<status>.*?))?$')
 
@@ -160,8 +160,11 @@ def decode_body(handler):
         if result is not None:
             encoding = result.group('charset')
             content_type = result.group('content_type')
-    #body = handler.buffer.getvalue().decode(encoding, 'replace')
-    return (content_type, handler.buffer.getvalue())
+    if content_type.startswith('text') or 'json' in content_type:
+        body = handler.buffer.getvalue().decode(encoding, 'replace')
+    else:
+        body = handler.buffer.getvalue()
+    return (content_type, body)
 
 
 class CurlDebugType(IntEnum):
@@ -320,7 +323,10 @@ class PyCyrlMuliHander(object):
                         handle.f_cb(return_error(status, decoded, content_type, http_message=handle.headers.pop('__STATUS__'), url=handle.getinfo(pycurl.EFFECTIVE_URL)))
                 for handle, code, message in failed:
                     self.handles.remove(handle)
-                    handle.f_cb(ConnectionError(code, message, "pycurl failed %s: %d" % (handle.getinfo(pycurl.EFFECTIVE_URL), code)))
+                    ex = ConnectionError(code, message)
+                    ex.url = pycurl.EFFECTIVE_URL
+                    ex.code = code
+                    handle.f_cb(ex)
 
 
 class PyCyrlConnection(object):
@@ -410,6 +416,7 @@ class PyCyrlConnection(object):
         settings = {
             pycurl.USERAGENT: self.user_agent,
             pycurl.ACCEPT_ENCODING: None if self.debug else "",
+            pycurl.TIMEOUT: self.timeout,
             #pycurl.NOSIGNAL: True,
             # We manage ourself our buffer, Help from Nagle is not needed
             pycurl.TCP_NODELAY: 1,
@@ -481,7 +488,7 @@ class PyCyrlConnection(object):
 
         return handle
 
-    def _perform_request(self, method, url, params=None, body=None, timeout=None, headers={}, ignore=(), future=None):
+    def _perform_request(self, method, url, params=None, body=None, headers={}, ignore=(), future=None):
         url = self.url_prefix + url
         if params is not None:
             url = '%s?%s' % (url, urlencode(params))
@@ -505,7 +512,6 @@ class PyCyrlConnection(object):
             curl_handle.setopt(pycurl.UPLOAD, 1)
             curl_handle.setopt(pycurl.READDATA, body)
 
-            #curl_handle.setopt(pycurl.POSTFIELDS, body)
         # Set after pycurl.POSTFIELDS to ensure that the request is the wanted one
         curl_handle.setopt(pycurl.CUSTOMREQUEST, method)
         if future is not None:
@@ -572,16 +578,14 @@ class PyCyrlConnection(object):
                     body = None
 
         ignore = ()
-        timeout = None
         if params:
-            timeout = params.pop('request_timeout', None)
             ignore = params.pop('ignore', ())
             if isinstance(ignore, int):
                 ignore = (ignore, )
 
         for attempt in range(self.max_retries + 1):
             connection = self
-            future_result = yield (method, url, params, body, headers, ignore, timeout)
+            future_result = yield (method, url, params, body, headers, ignore)
             # The first used to return params return with no future_result, so skip it
             if future_result is None:
                 continue
@@ -593,16 +597,12 @@ class PyCyrlConnection(object):
                     future.set_result(False)
                     break
                 retry = False
-                if isinstance(e, ConnectionTimeout):
-                    retry = self.retry_on_timeout
-                elif isinstance(e, ConnectionError):
+                if isinstance(e, ConnectionError):
                     retry = True
                 elif e.status_code in self.retry_on_status:
                     retry = True
 
                 if retry:
-                    # only mark as dead if we are retrying
-                    self.mark_dead(connection)
                     # raise exception on last retry
                     if attempt == self.max_retries:
                         future.set_exception(e)
@@ -630,22 +630,19 @@ class PyCyrlConnection(object):
          next_params,
          next_body,
          next_headers,
-         ignore,
-         timeout) = query_iterator.send(None)
+         ignore) = query_iterator.send(None)
         while True:
             curl_future = Future(loop=self.loop)
             yield from self._perform_request(method, next_url, next_params, next_body,
                                                        headers=next_headers,
-                                                       ignore=ignore,
-                                                       timeout=timeout, future=curl_future)
+                                                       ignore=ignore, future=curl_future)
             try:
                 (next_method,
                  next_url,
                  next_params,
                  next_body,
                  next_headers,
-                 ignore,
-                 timeout) = query_iterator.send(curl_future.result)
+                 ignore) = query_iterator.send(curl_future.result)
             except StopIteration:
                 break
         return futur_result.result()
