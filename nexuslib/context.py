@@ -2,9 +2,8 @@ from configparser import ConfigParser
 from asyncio import new_event_loop, ensure_future, wait, FIRST_COMPLETED
 import copy
 from urllib import parse
-from nexuslib.pycurlconnection import PyCyrlConnection, CurlDebugType
 import re
-
+import importlib
 
 class ConfigurationError(Exception):
     def __init__(self, value):
@@ -48,7 +47,8 @@ class Context(object):
             'timeout': 10,
             'scheme': 'http',
             'host': 'localhost',
-            'port': 80
+            'port': 80,
+            'curllib': None,
         },
         'logging': {
             'filters': 'header,data,text',
@@ -132,6 +132,7 @@ class Context(object):
         if self.current_config['connection']['username'] is None and self.current_config['connection']['kerberos'] is None:
             raise ConfigurationError('not enough authentication informations')
 
+        pycurlconnection = importlib.import_module('nexuslib.pycurlconnection')
         if self.current_config['logging']['filters'] is not None and self.current_config['connection']['debug']:
             self.filter = 0
             filters = [x.strip() for x in self.current_config['logging']['filters'].split(',')]
