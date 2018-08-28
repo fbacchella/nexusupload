@@ -1,5 +1,5 @@
 from configparser import ConfigParser
-from asyncio import new_event_loop, ensure_future, wait, FIRST_COMPLETED
+from asyncio import new_event_loop, wait, FIRST_COMPLETED
 import copy
 from urllib import parse
 import re

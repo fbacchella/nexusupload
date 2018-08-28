@@ -6,7 +6,6 @@ from enum import IntEnum
 import time
 from logging import Logger
 from asyncio import Queue, QueueEmpty, get_event_loop, wait_for, TimeoutError, wait
-import json
 import logging
 from asyncio import Future, ensure_future
 from urllib.parse import urlencode
@@ -224,7 +223,7 @@ class PyCyrlMuliHander(object):
 
         # put the query in the waiting queue, that launch it if possible
         # and wait for the processing to be finished
-        yield from wait((future,self.waiting_handles.put(handle)), loop=self.loop)
+        yield from wait((future, self.waiting_handles.put(handle)), loop=self.loop)
         return future
 
     def close(self):
@@ -564,7 +563,6 @@ class PyCyrlConnection(object):
                 ignore = (ignore, )
 
         for attempt in range(self.max_retries + 1):
-            connection = self
             future_result = yield (method, url, params, body, headers, ignore)
             # The first used to return params return with no future_result, so skip it
             if future_result is None:
