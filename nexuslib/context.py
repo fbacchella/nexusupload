@@ -3,7 +3,6 @@ from asyncio import new_event_loop, ensure_future, wait, FIRST_COMPLETED
 import copy
 from urllib import parse
 import re
-import importlib
 
 class ConfigurationError(Exception):
     def __init__(self, value):
@@ -19,10 +18,10 @@ class Context(object):
     netloc_re = re.compile('(?P<host>[^:]+)(:(?P<port>\d+))?')
 
     # The settings that store boolean values
-    boolean_options = {'connection': frozenset(['debug', 'kerberos']), 'logging': {}, 'kerberos': {}, 'ssl': frozenset(['verify_certs'])}
+    boolean_options = {'connection': frozenset(['debug', 'kerberos']), 'logging': {}, 'kerberos': {}, 'ssl': frozenset(['verify_certs']), 'pycurl': {}}
 
     # The settings that store integer values
-    integer_options = {'connection': frozenset(['timeout', 'max_active']), 'logging': {}, 'kerberos': {}, 'ssl': {}}
+    integer_options = {'connection': frozenset(['timeout', 'max_active']), 'logging': {}, 'kerberos': {}, 'ssl': {}, 'pycurl': {}}
 
     # mapping from command line options to configuration options:
     arg_options = {'debug': ['connection', 'debug'],
@@ -48,7 +47,6 @@ class Context(object):
             'scheme': 'http',
             'host': 'localhost',
             'port': 80,
-            'curllib': None,
         },
         'logging': {
             'filters': 'header,data,text',
@@ -67,6 +65,10 @@ class Context(object):
             'key_file': None,
             'key_type': None,
             'key_password': None,
+        },
+        'pycurl': {
+            'libcurl_path': None,
+            'pycurl_path': None
         }
     }
 
@@ -132,7 +134,10 @@ class Context(object):
         if self.current_config['connection']['username'] is None and self.current_config['connection']['kerberos'] is None:
             raise ConfigurationError('not enough authentication informations')
 
-        pycurlconnection = importlib.import_module('nexuslib.pycurlconnection')
+        self.check_pycurl(**self.current_config['pycurl'])
+
+        from nexuslib.pycurlconnection import CurlDebugType
+
         if self.current_config['logging']['filters'] is not None and self.current_config['connection']['debug']:
             self.filter = 0
             filters = [x.strip() for x in self.current_config['logging']['filters'].split(',')]
@@ -163,7 +168,21 @@ class Context(object):
         self.current_config['connection']['port'] = port
         self.current_config['connection']['url_prefix'] = connect_url.path
 
+    def check_pycurl(self, libcurl_path=None, pycurl_path=None):
+        # Some distributions provides really old curl and pycurl
+        # So a custom definition can be provided
+        if libcurl_path is not None:
+            from ctypes import cdll
+            cdll.LoadLibrary(libcurl_path)
+
+        if pycurl_path is not None:
+            import importlib.util
+            import sys
+            pycurlspec = importlib.util.spec_from_file_location('pycurl', pycurl_path)
+            sys.modules[pycurlspec.name] = pycurlspec.loader.load_module()
+
     def connect(self, parent=None):
+        from nexuslib.pycurlconnection import PyCyrlConnection
         if parent is not None:
             self.multi_handle = parent.multi_handle
             self.curl_perform_task = parent.curl_perform_task
