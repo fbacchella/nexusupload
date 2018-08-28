@@ -6,6 +6,7 @@ import re
 from os.path import basename
 from optparse import OptionParser
 from nexuslib.context import Context, ConfigurationError
+from nexuslib.exceptions import NexusException
 import rpmfile
 
 

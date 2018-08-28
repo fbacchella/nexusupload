@@ -10,6 +10,7 @@ import json
 import logging
 from asyncio import Future, ensure_future
 from urllib.parse import urlencode
+from nexuslib.exceptions import NexusException
 
 logger = logging.getLogger('nexuslib.pycurlconnection')
 
@@ -122,27 +123,6 @@ def get_header_function(headers):
 
 
 content_type_re = re.compile("(?P<content_type>.*?); (?:charset=(?P<charset>.*))")
-
-
-def return_error(status_code, raw_data, content_type='application/json', http_message=None, url=None):
-    """ Locate appropriate exception and raise it. """
-
-    error_message = raw_data
-    additional_info = None
-    if raw_data and content_type == 'application/json':
-        try:
-            additional_info = json.loads(raw_data)
-            error = additional_info.get('error', error_message)
-            if isinstance(error, dict) and 'type' in error:
-                error_message = error['type']
-                if 'resource.id' in error:
-                    error_message += ' for resource "' + error['resource.id'] + '"'
-        except (ValueError, TypeError) as err:
-            logger.warning('Undecodable raw error response from server: %s', err)
-    elif http_message is not None:
-        additional_info = {'elasticerror': False}
-        error_message = http_message
-    return HTTP_EXCEPTIONS.get(status_code, TransportError)(status_code, error_message, additional_info, url)
 
 
 def decode_body(handler):
@@ -320,7 +300,7 @@ class PyCyrlMuliHander(object):
                     elif status >= 200 and status < 300:
                         handle.cb(status, handle.headers, decoded)
                     elif status >= 300:
-                        handle.f_cb(return_error(status, decoded, content_type, http_message=handle.headers.pop('__STATUS__'), url=handle.getinfo(pycurl.EFFECTIVE_URL)))
+                        handle.f_cb(NexusException(status, decoded, content_type, http_message=handle.headers.pop('__STATUS__'), url=handle.getinfo(pycurl.EFFECTIVE_URL)))
                 for handle, code, message in failed:
                     self.handles.remove(handle)
                     ex = ConnectionError(code, message)
@@ -529,7 +509,7 @@ class PyCyrlConnection(object):
             if not (200 <= status < 300) and status not in ignore:
                 self.log_request_fail(method, full_url, url, body, duration, status)
                 http_message = curl_handle.headers.pop('__STATUS__')
-                raise return_error(status, body, content_type, http_message)
+                raise NexusException(status, body, content_type, http_message)
 
             self.log_request_success(method, full_url, url, curl_handle.buffer.getvalue(), status,
                                      body, duration)
