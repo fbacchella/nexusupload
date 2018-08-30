@@ -11,9 +11,12 @@ from asyncio import Future, ensure_future
 from urllib.parse import urlencode
 from nexuslib.exceptions import NexusException
 
+
 logger = logging.getLogger('nexuslib.pycurlconnection')
 
+
 status_line_re = re.compile(r'HTTP\/\S+\s+\d+(\s+(?P<status>.*?))?$')
+
 
 def version_tuple(version):
     if isinstance(version, str):
@@ -67,6 +70,7 @@ def set_version_info():
                 features.add(features_mapping.get(i, i))
     version_info.features = features
     return version_info
+
 
 version_info = set_version_info()
 
@@ -139,7 +143,7 @@ def decode_body(handler):
         if result is not None:
             encoding = result.group('charset')
             content_type = result.group('content_type')
-    if content_type.startswith('text') or 'json' in content_type:
+    if content_type is not None and (content_type.startswith('text') or 'json' in content_type):
         body = handler.buffer.getvalue().decode(encoding, 'replace')
     else:
         body = handler.buffer.getvalue()
@@ -291,6 +295,7 @@ class PyCyrlMuliHander(object):
                 (waiting, succeded, failed) = self.multi.info_read()
                 for handle in succeded:
                     self.handles.remove(handle)
+                    self.multi.remove_handle(handle)
                     status = handle.getinfo(pycurl.RESPONSE_CODE)
                     content_type, decoded = decode_body(handle)
                     if not self.running:
@@ -302,6 +307,7 @@ class PyCyrlMuliHander(object):
                         handle.f_cb(NexusException(status, decoded, content_type, http_message=handle.headers.pop('__STATUS__'), url=handle.getinfo(pycurl.EFFECTIVE_URL)))
                 for handle, code, message in failed:
                     self.handles.remove(handle)
+                    self.multi.remove_handle(handle)
                     ex = ConnectionError(code, message)
                     ex.url = pycurl.EFFECTIVE_URL
                     ex.code = code
@@ -310,30 +316,23 @@ class PyCyrlMuliHander(object):
 
 class PyCyrlConnection(object):
     """
-     Default connection class using the `urllib3` library and the http protocol.
-
+     :arg scheme: url scheme to use (default: http)
      :arg host: hostname of the node (default: localhost)
      :arg port: port to use (integer, default: 9200)
-     :arg url_prefix: optional url prefix for elasticsearch
+     :arg url_prefix: optional url prefix for nexus
      :arg timeout: default timeout in seconds (float, default: 10)
+     :arg max_retries:  number of retry in case of non-permanent failures (int, default: 1)
      :arg http_auth: optional http auth information as either ':' separated
-         string or a tuple
+          string or a tuple
      :arg kerberos: can use kerberos ticket for authentication
-     :arg user_agent: user_agent to use, needed because CAS is picky about that
+     :arg user_agent: user_agent to use, needed because CAS is picky about that (default: pycurl/nexuslib)
      :arg use_ssl: use ssl for the connection if `True`
      :arg verify_certs: whether to verify SSL certificates
-     :arg ca_certs: optional path to CA bundle.
      :arg ssl_opts: a set of options that will be resolved
      :arg debug: activate curl debuging
      :arg debug_filter: sum of curl filters, for debuging
-     :arg logger: debug output, can be a file or a logging.Logger
+     :arg logger: debug output, can be a file or a logging.Logger (default: stderr)
      """
-    #self, host = 'localhost', port = 9200, use_ssl = False, url_prefix = '', timeout = 10, scheme = 'http',
-    #verify_certs = True, ca_certs = None,
-    #
-    #debug_filter = CurlDebugType.HEADER + CurlDebugType.DATA, debug = False, logger = sys.stderr,
-    #** kwargs
-
     ssl_opts_mapping = {
         'ca_certs_directory': pycurl.CAPATH,
         'ca_certs_file': pycurl.CAINFO,
@@ -350,7 +349,7 @@ class PyCyrlConnection(object):
                  http_auth=None, kerberos=False, user_agent="pycurl/nexuslib",
                  use_ssl=False, verify_certs=False, ssl_opts={},
                  debug=False, debug_filter=CurlDebugType.HEADER + CurlDebugType.DATA, logger=sys.stderr):
-
+        self.retry_on_status = (502, 503, 504,)
         self.loop = loop
         if multi_handle is None:
             self.multi_handle = PyCyrlMuliHander(max_active, loop=self.loop)
@@ -373,9 +372,7 @@ class PyCyrlConnection(object):
             scheme = 'http'
             self.use_ssl = False
         self.host = '%s://%s:%s' % (scheme, host, port)
-        if url_prefix:
-            url_prefix = '/' + url_prefix.strip('/')
-        self.url_prefix = url_prefix
+        self.url_prefix = '/' + url_prefix.strip('/')
         self.timeout = timeout
         self.kerberos = kerberos
         if isinstance(http_auth, tuple):
@@ -399,7 +396,6 @@ class PyCyrlConnection(object):
             #pycurl.NOSIGNAL: True,
             # We manage ourself our buffer, Help from Nagle is not needed
             pycurl.TCP_NODELAY: 1,
-            # ES connections are long, keep them alive to be firewall-friendly
             pycurl.TCP_KEEPALIVE: 1,
             # Don't keep persistent data
             pycurl.COOKIEFILE: '/dev/null',
@@ -456,7 +452,6 @@ class PyCyrlConnection(object):
         # Prepare headers:
         default_headers = {
             'Connection': 'Keep-Alive',
-            'Content-Type': 'application/x-rpm',
             'Expect': '',
             'Accept': '',
         }
@@ -515,11 +510,8 @@ class PyCyrlConnection(object):
 
             return status, curl_handle.headers, body
 
-    def close(self):
-        pass
-
     def __repr__(self):
-        return '<%s: %s>' % (self.__class__.__name__, self.host)
+        return '<%s: %s:%d>' % (self.__class__.__name__, self.host, self.port)
 
     def perform_async_request(self, future, method, url, headers=None, params=None, body=None):
         """
@@ -533,6 +525,7 @@ class PyCyrlConnection(object):
         If the operation was succesful and the connection used was previously
         marked as dead, mark it as live, resetting it's failure count.
 
+        :arg future: a async future that will store the request result
         :arg method: HTTP method to use
         :arg url: absolute url (without host) to target
         :arg headers: dictionary of headers, will be handed over to the
@@ -542,20 +535,6 @@ class PyCyrlConnection(object):
         :arg body: body of the request, will be serializes using serializer and
             passed to the connection
         """
-        if body is not None:
-            # some clients or environments don't support sending GET with body
-            if method in ('HEAD', 'GET') and self.send_get_body_as != 'GET':
-                # send it as post instead
-                if self.send_get_body_as == 'POST':
-                    method = 'POST'
-
-                # or as source parameter
-                elif self.send_get_body_as == 'source':
-                    if params is None:
-                        params = {}
-                    params['source'] = body
-                    body = None
-
         ignore = ()
         if params:
             ignore = params.pop('ignore', ())
@@ -564,7 +543,7 @@ class PyCyrlConnection(object):
 
         for attempt in range(self.max_retries + 1):
             future_result = yield (method, url, params, body, headers, ignore)
-            # The first used to return params return with no future_result, so skip it
+            # The first yield used to return params return with no future_result, so skip it
             if future_result is None:
                 continue
 

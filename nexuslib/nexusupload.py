@@ -76,9 +76,9 @@ def upload(*args, context=None, doop=False):
             dest = '/%s/%s%s/%s' % (rpm_type, v, arch, basename(rpm_file_name))
             if doop:
                 rpm_file = open(rpm_file_name, 'rb')
-                op_future = asyncio.ensure_future(context.nexuscnx.perform_request('PUT', dest, body=rpm_file, headers={
-                    'Content-Type': 'application/x-rpm'}),
-                                                  loop=context.loop)
+                request = context.nexuscnx.perform_request('PUT', dest,
+                                                           body=rpm_file, headers={'Content-Type': 'application/x-rpm'})
+                op_future = asyncio.ensure_future(request, loop=context.loop)
                 op_future.add_done_callback(get_done_cb(dest, rpm_file))
                 tasks.add(op_future)
                 if len(tasks) > 10:
@@ -90,7 +90,7 @@ def upload(*args, context=None, doop=False):
                 for i in done:
                     try:
                         i.result()
-                    except NexusException as e:
+                    except NexusException:
                         pass
             else:
                 print(rpm_file_name, '->', dest)
@@ -100,7 +100,7 @@ def upload(*args, context=None, doop=False):
         for i in done:
             try:
                 i.result()
-            except NexusException as e:
+            except NexusException:
                 pass
 
 
@@ -110,10 +110,8 @@ def main():
     if 'NEXUSCONFIG' in os.environ:
         default_config = os.environ['NEXUSCONFIG']
 
-    usage_common = "usage: %prog [options] files*"
-    #The first level parser
-    parser = OptionParser()
-    parser.add_option("-c", "--config", dest="config_file", help="an alternative config file", default=default_config)
+    parser = OptionParser(usage="usage: %prog [options] rpmfiles*")
+    parser.add_option("-c", "--config", dest="config_file", help="An alternative config file", default=default_config)
     parser.add_option("-d", "--debug", dest="debug", help="The debug level", action="store_true")
     parser.add_option("--passwordfile", dest="passwordfile", help="Read the password from that file")
     parser.add_option("-u", "--user", "--username", dest="username", help="User to authenticate")
@@ -123,7 +121,7 @@ def main():
 
     (options, args) = parser.parse_args()
 
-    #Extract the context options from the first level arguments
+    #Extract the context options from the options
     context_args = {k: v for k, v in list(vars(options).items()) if v is not None}
     context = None
     try:
