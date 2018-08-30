@@ -110,6 +110,9 @@ The pattern for the paths is hard coded and they are at this time:
  - `/Packages/$MAJOR/$arch/file` for packages RPMS
  - `/debug/$MAJOR/file` for debuginfo RPMS
  
+Those pattern expected the directory depth to be set to 2 in Nexus for corresponding yum
+repository.
+ 
 There is no delete support. It's still need to be done using the web interface.
  
 The pycurlconnection.py is overcomplicated, it should be simplified.
