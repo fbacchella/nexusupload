@@ -19,10 +19,27 @@ def get_done_cb(dest, rpm_file):
         else:
             print(dest, 'failed with', ex)
         try:
-            rpm_file.close()
+            if rpm_file is not None:
+                rpm_file.close()
         except Exception as ex2:
             print(dest, ex2)
     return done_cb
+
+
+def get_check_cb(rpm_file_name, dest):
+    def done_cb(f):
+        ex = f.exception()
+        if ex is None:
+            result = f.result()
+            # try with HEAD mean 200 -> already exists
+            if result:
+                print(rpm_file_name, '->', dest, 'already exists')
+            else:
+                print(rpm_file_name, '->', dest, 'to be uploaded')
+        else:
+            print(dest, 'failed with', ex)
+    return done_cb
+
 
 def upload(*args, context=None, doop=False):
     valid_archs=set(['x86_64', 'noarch', 'i686', 'i586', 'i386'])
@@ -78,22 +95,24 @@ def upload(*args, context=None, doop=False):
                 rpm_file = open(rpm_file_name, 'rb')
                 request = context.nexuscnx.perform_request('PUT', dest,
                                                            body=rpm_file, headers={'Content-Type': 'application/x-rpm'})
-                op_future = asyncio.ensure_future(request, loop=context.loop)
-                op_future.add_done_callback(get_done_cb(dest, rpm_file))
-                tasks.add(op_future)
-                if len(tasks) > 10:
-                    timeout = None
-                else:
-                    timeout = 0
-                done, tasks = yield from asyncio.wait(tasks, timeout=timeout, loop=context.loop,
-                                                        return_when=asyncio.FIRST_COMPLETED)
-                for i in done:
-                    try:
-                        i.result()
-                    except NexusException:
-                        pass
+                done_cb = get_done_cb(dest, rpm_file)
             else:
-                print(rpm_file_name, '->', dest)
+                request = context.nexuscnx.perform_request('HEAD', dest)
+                done_cb = get_check_cb(rpm_file_name, dest)
+            op_future = asyncio.ensure_future(request, loop=context.loop)
+            op_future.add_done_callback(done_cb)
+            tasks.add(op_future)
+            if len(tasks) > 10:
+                timeout = None
+            else:
+                timeout = 0
+            done, tasks = yield from asyncio.wait(tasks, timeout=timeout, loop=context.loop,
+                                                    return_when=asyncio.FIRST_COMPLETED)
+            for i in done:
+                try:
+                    i.result()
+                except NexusException:
+                    pass
     if len(tasks) != 0:
         done, tasks = yield from asyncio.wait(tasks, timeout=None, loop=context.loop,
                                               return_when=asyncio.ALL_COMPLETED)
