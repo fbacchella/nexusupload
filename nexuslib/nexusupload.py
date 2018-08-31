@@ -82,11 +82,17 @@ def upload(*args, context=None, doop=False):
                     source = True
                 else:
                     source = False
+        except IsADirectoryError as e:
+            continue
+        except AssertionError as e:
+            print('invalid rpm "%s"' % rpm_file_name, file=sys.stderr)
+            continue
         except Exception as e:
-            print('invalid rpm "%s' % rpm_file_name, type(e), file=sys.stderr)
+            print('invalid rpm "%s"' % rpm_file_name, e, file=sys.stderr)
             continue
         if not source and (arch is None or arch not in valid_archs):
             print('not a matching rpm: "%s", invalid architecture %s' % (rpm_file_name, arch), file=sys.stderr)
+            continue
         if source:
             rpm_type = 'SRPMS'
             arch = ''
