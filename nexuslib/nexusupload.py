@@ -43,31 +43,42 @@ def get_check_cb(rpm_file_name, dest):
 
 def upload(*args, context=None, doop=False):
     valid_archs=set(['x86_64', 'noarch', 'i686', 'i586', 'i386'])
-    release_re = re.compile(""".*(\.|_)(rh)?el(?P<version>\d)(u\d)?.*""")
+    major_re = re.compile(""".*(\.|_|-)(rh)?el(?P<version>\d)(u\d)?.*""")
+    filename_re = re.compile(""".*?((\.|_|-)(rh)?el(?P<osmajor>\d)(u\d+)?)?(\.centos)?\.(?P<filearch>[_0-9a-z]+)\.rpm""")
 
     tasks = set()
     for rpm_file_name in args:
         try:
             with rpmfile.open(rpm_file_name) as rpm:
-                # Returned as bytes, ensure it' a str
-                for key in ('arch', 'release'):
+                filename_match = filename_re.fullmatch(basename(rpm_file_name))
+
+                # Returned as bytes, ensure it' a str or None
+                for key in ('arch', 'release', 'version', 'release'):
                     if key in rpm.headers:
-                        rpm.headers[key] = rpm.headers[key].decode('us-ascii')
+                        if isinstance(rpm.headers[key], bytes):
+                            rpm.headers[key] = rpm.headers[key].decode('us-ascii', 'replace')
                     else:
                         rpm.headers[key] = None
-                arch = rpm.headers.pop('arch')
-                release = rpm.headers.pop('release')
-                release_match = release_re.fullmatch(release)
-                if release_match is not None:
-                    centos_version = release_match.group('version')
-                else:
-                    centos_version = ''
+
+                filearch = filename_match.group('filearch')
+                arch = rpm.headers['arch']
+                centos_version = None
+                for try_major in ('version', 'release'):
+                    major_match = major_re.fullmatch(rpm.headers[try_major])
+                    if major_match is not None:
+                        centos_version = major_match.group('version')
+                        break
+                # The rhel version is not always in the release or the version name
+                # Sometimes, it's in the file name
+                if centos_version is None and filename_match is not None:
+                    centos_version = filename_match.group('osmajor')
+
                 debuginfo = False
-                for i in rpm.headers.pop('provides', []):
-                    if '-debuginfo' in i.decode('us-ascii'):
+                for i in map(lambda x: x.decode('us-ascii', 'replace'), rpm.headers.get('provides', [])):
+                    if i is not None and '-debuginfo' in i:
                         debuginfo = True
                         break
-                if 'source' in rpm.headers:
+                if 'source' in rpm.headers or filearch == 'src':
                     source = True
                 else:
                     source = False
