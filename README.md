@@ -72,6 +72,21 @@ libcurl_path=None
 pycurl_path=None
 ```
 
+## File detection override ##
+
+It the detetction of the informations from a rpm is know to be wrong , it can always be overriden. Each files can be 
+suffix with a ';'-separated list of informations.
+
+If a digit is given, it defines the major version, it can be specified many times. It totally override 
+the auto-detection.
+
+It the string 'debuginfo' is given, the rpm is debuginformations.
+
+Any other string is matched as the architecture, the last occurence win.
+
+For example: `nexusupload somerpm-el6.x86_64.rpm;5;6;src` will mark the file as being for 6 and 7 and manage
+this package as a source rpm.
+
 ## CURL and PyCurl libraries
 
 Some distribution provides quite old curl and pycurl with missing features, like TLSv1.2 and 

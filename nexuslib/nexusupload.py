@@ -45,9 +45,33 @@ def upload(*args, context=None, doop=False):
     valid_archs=set(['x86_64', 'noarch', 'i686', 'i586', 'i386'])
     major_re = re.compile(""".*(\.|_|-)(rh)?el(?P<version>\d)(u\d)?.*""")
     filename_re = re.compile(""".*?((\.|_|-)(rh)?el(?P<osmajor>\d)(u\d+)?)?(\.centos)?\.(?P<filearch>[_0-9a-z]+)\.rpm""")
-
+    rpm_info_re = re.compile("""(?P<version>\d+)|debuginfo|(?P<arch>[_0-9a-z]+)""")
     tasks = set()
-    for rpm_file_name in args:
+    for rpm_file_info in args:
+        rpm_file_infos = rpm_file_info.split(';')
+        rpm_file_name = rpm_file_infos[0]
+        rpm_good_file_infos = True
+        centos_version = []
+        filearch = None
+        debuginfo = False
+        for i in rpm_file_infos[1:]:
+            rpm_info_match = rpm_info_re.fullmatch(i)
+            if rpm_info_match is None:
+                print('invalid rpm info "%s"' % rpm_file_info, file=sys.stderr)
+                rpm_good_file_infos = False
+                break
+            else:
+                add_version = rpm_info_match.group('version')
+                new_filearch = rpm_info_match.group('arch')
+                if add_version is not None:
+                    centos_version.append(add_version)
+                elif new_filearch is not None:
+                    filearch = new_filearch
+                elif i == 'debuginfo':
+                    debuginfo = True
+
+        if not rpm_good_file_infos:
+            continue
         try:
             with rpmfile.open(rpm_file_name) as rpm:
                 filename_match = filename_re.fullmatch(basename(rpm_file_name))
@@ -59,23 +83,27 @@ def upload(*args, context=None, doop=False):
                             rpm.headers[key] = rpm.headers[key].decode('us-ascii', 'replace')
                     else:
                         rpm.headers[key] = None
-
-                filearch = filename_match.group('filearch')
+                # the explicit filearch given in the command line wins
+                if filearch is None and filename_match is not None:
+                    filearch = filename_match.group('filearch')
                 arch = rpm.headers['arch']
-                centos_version = None
-                for try_major in ('version', 'release'):
-                    major_match = major_re.fullmatch(rpm.headers[try_major])
-                    if major_match is not None:
-                        centos_version = major_match.group('version')
-                        break
+                # If the centos_version was not explicit, try to resolve from version or release
+                if len(centos_version) == 0:
+                    for try_major in ('version', 'release'):
+                        major_match = major_re.fullmatch(rpm.headers[try_major])
+                        if major_match is not None:
+                            centos_version = (major_match.group('version'), )
+                            break
                 # The rhel version is not always in the release or the version name
                 # Sometimes, it's in the file name
-                if centos_version is None and filename_match is not None:
-                    centos_version = filename_match.group('osmajor')
-
-                debuginfo = False
+                if len(centos_version) == 0 and filename_match is not None and filename_match.group('osmajor') is not None:
+                    centos_version = (filename_match.group('osmajor'), )
                 for i in map(lambda x: x.decode('us-ascii', 'replace'), rpm.headers.get('provides', [])):
                     if i is not None and '-debuginfo' in i:
+                        debuginfo = True
+                        break
+                for i in map(lambda x: x.decode('us-ascii', 'replace'), rpm.headers.get(1118, [])):
+                    if i == '/usr/lib/debug/.build-id/':
                         debuginfo = True
                         break
                 if 'source' in rpm.headers or filearch == 'src':
@@ -90,6 +118,9 @@ def upload(*args, context=None, doop=False):
         except Exception as e:
             print('invalid rpm "%s"' % rpm_file_name, e, file=sys.stderr)
             continue
+        if source and debuginfo:
+            print('can\'t be both a source and a debuginfo rpm')
+            continue
         if not source and (arch is None or arch not in valid_archs):
             print('not a matching rpm: "%s", invalid architecture %s' % (rpm_file_name, arch), file=sys.stderr)
             continue
@@ -102,11 +133,12 @@ def upload(*args, context=None, doop=False):
         else:
             rpm_type = 'Packages'
             arch = "/%s" % arch
-        if centos_version is None or len(centos_version) == 0:
-            versions = (5, 6, 7)
-        else:
-            versions = (centos_version)
-        for v in versions:
+        if centos_version == None:
+            print('invalid rpm "%s"' % rpm_file_name, file=sys.stderr)
+            continue
+        if len(centos_version) == 0:
+            centos_version = (5, 6, 7)
+        for v in centos_version:
             dest = '/%s/%s%s/%s' % (rpm_type, v, arch, basename(rpm_file_name))
             if doop:
                 rpm_file = open(rpm_file_name, 'rb')
