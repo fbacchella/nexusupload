@@ -196,7 +196,7 @@ def get_curl_debug(debug_filter, logger):
     return _curl_debug
 
 
-class PyCyrlMuliHander(object):
+class PyCyrlMultiHander(object):
 
     def __init__(self, max_query=10, loop=get_event_loop()):
         self.loop = loop
@@ -352,7 +352,7 @@ class PyCyrlConnection(object):
         self.retry_on_status = (502, 503, 504,)
         self.loop = loop
         if multi_handle is None:
-            self.multi_handle = PyCyrlMuliHander(max_active, loop=self.loop)
+            self.multi_handle = PyCyrlMultiHander(max_active, loop=self.loop)
             self.curl_perform_task = ensure_future(self.multi_handle.perform(), loop=self.loop)
         else:
             self.multi_handle = multi_handle
