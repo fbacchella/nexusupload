@@ -137,7 +137,7 @@ def upload(*args, context=None, doop=False):
             print('invalid rpm "%s"' % rpm_file_name, file=sys.stderr)
             continue
         if len(centos_version) == 0:
-            centos_version = (5, 6, 7)
+            centos_version = (5, 6, 7, 8)
         for v in centos_version:
             dest = '/%s/%s%s/%s' % (rpm_type, v, arch, basename(rpm_file_name))
             if doop:
