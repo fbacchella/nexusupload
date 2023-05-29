@@ -45,6 +45,7 @@ class Context(object):
             'max_active': 10,
             'timeout': 10,
             'scheme': 'http',
+            'http_version': None,
             'host': 'localhost',
             'port': 80,
         },
@@ -136,7 +137,7 @@ class Context(object):
 
         self.check_pycurl(**self.current_config['pycurl'])
 
-        from nexuslib.pycurlconnection import CurlDebugType
+        from nexuslib.pycurlconnection import CurlDebugType, http_versions
 
         if self.current_config['logging']['filters'] is not None and self.current_config['connection']['debug']:
             self.filter = 0
@@ -157,6 +158,9 @@ class Context(object):
         else:
             raise ConfigurationError('invalid URL scheme "%s"' % scheme)
         self.current_config['connection']['scheme'] = scheme
+        if self.current_config['connection']['http_version'] is not None \
+                and self.current_config['connection']['http_version'] not in http_versions:
+            raise ConfigurationError('Unknown http version')
         netloc = connect_url.netloc
         netloc_match = Context.netloc_re.fullmatch(netloc)
         if netloc_match is None:
@@ -207,6 +211,11 @@ class Context(object):
         if self.current_config['connection']['user_agent'] is not None:
             cnxprops.update({
                 'user_agent': self.current_config['connection']['user_agent'],
+            })
+
+        if self.current_config['connection']['http_version'] is not None:
+            cnxprops.update({
+                'http_version': self.current_config['connection']['http_version'],
             })
 
         if self.current_config['connection']['username'] is not None and self.current_config['connection']['password'] is not None:

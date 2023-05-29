@@ -75,6 +75,14 @@ def set_version_info():
 version_info = set_version_info()
 
 
+http_versions = {
+    '0.9': None,
+    '1.0': pycurl.CURL_HTTP_VERSION_1_0,
+    '1.1': pycurl.CURL_HTTP_VERSION_1_1,
+    '2':   3 # pycurl.CURL_HTTP_VERSION_2
+}
+
+
 def get_header_function(headers):
 
     # Current header are store in a different dict
@@ -346,7 +354,7 @@ class PyCyrlConnection(object):
     def __init__(self,
                  scheme='http', host='localhost', port=443, url_prefix='', timeout=10, max_retries=1,
                  multi_handle=None, loop=None, max_active=1, curl_perform_task=None,
-                 http_auth=None, kerberos=False, user_agent="pycurl/nexuslib",
+                 http_auth=None, http_version=None, kerberos=False, user_agent="pycurl/nexuslib",
                  use_ssl=False, verify_certs=False, ssl_opts={},
                  debug=False, debug_filter=CurlDebugType.HEADER + CurlDebugType.DATA, logger=sys.stderr):
         self.retry_on_status = (502, 503, 504,)
@@ -380,6 +388,10 @@ class PyCyrlConnection(object):
         else:
             self.http_auth = http_auth
         self.user_agent = user_agent
+        if http_version is not None and http_version in http_versions:
+            self.http_version = http_versions[http_version]
+        else:
+            self.http_version = None
         if debug:
             self.debug = True
             self.debug_filter = get_curl_debug(debug_filter, logger)
@@ -435,6 +447,9 @@ class PyCyrlConnection(object):
             })
         elif self.http_auth is not None:
             settings[pycurl.USERPWD] = self.http_auth
+
+        if self.http_version is not None:
+            settings[pycurl.HTTP_VERSION] = self.http_version
 
         # Debug setup
         if self.debug:
