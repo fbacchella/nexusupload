@@ -14,10 +14,8 @@ import asyncio
 def get_done_cb(dest, rpm_file):
     def done_cb(f):
         ex = f.exception()
-        if ex is None and f.result():
+        if ex is None:
             print(dest, 'uploaded')
-        elif ex is None:
-            print(dest, 'upload failed')
         else:
             print(dest, 'failed with', ex)
         try:
