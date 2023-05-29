@@ -186,7 +186,7 @@ class Context(object):
             sys.modules[pycurlspec.name] = pycurlspec.loader.load_module()
 
     def connect(self, parent=None):
-        from nexuslib.pycurlconnection import PyCyrlConnection
+        from nexuslib.pycurlconnection import PyCurlConnection
         if parent is not None:
             self.multi_handle = parent.multi_handle
             self.curl_perform_task = parent.curl_perform_task
@@ -239,7 +239,7 @@ class Context(object):
             verify_certs = False
             scheme='http'
 
-        self.nexuscnx = PyCyrlConnection(
+        self.nexuscnx = PyCurlConnection(
             scheme=scheme,
             loop=self.loop, multi_handle=self.multi_handle, max_active=max_active, curl_perform_task=self.curl_perform_task,
             use_ssl=use_ssl, verify_certs=verify_certs, ssl_opts=ssl_opts,

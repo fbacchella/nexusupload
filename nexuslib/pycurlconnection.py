@@ -204,7 +204,7 @@ def get_curl_debug(debug_filter, logger):
     return _curl_debug
 
 
-class PyCyrlMultiHander(object):
+class PyCurlMultiHander(object):
 
     def __init__(self, max_query=10, loop=get_event_loop()):
         self.loop = loop
@@ -322,7 +322,7 @@ class PyCyrlMultiHander(object):
                     handle.f_cb(ex)
 
 
-class PyCyrlConnection(object):
+class PyCurlConnection(object):
     """
      :arg scheme: url scheme to use (default: http)
      :arg host: hostname of the node (default: localhost)
@@ -360,7 +360,7 @@ class PyCyrlConnection(object):
         self.retry_on_status = (502, 503, 504,)
         self.loop = loop
         if multi_handle is None:
-            self.multi_handle = PyCyrlMultiHander(max_active, loop=self.loop)
+            self.multi_handle = PyCurlMultiHander(max_active, loop=self.loop)
             self.curl_perform_task = ensure_future(self.multi_handle.perform(), loop=self.loop)
         else:
             self.multi_handle = multi_handle
@@ -374,8 +374,8 @@ class PyCyrlConnection(object):
             scheme = 'https'
             self.use_ssl = True
             for k, v in ssl_opts.items():
-                if k in PyCyrlConnection.ssl_opts_mapping and v is not None:
-                    self.ssl_opts[PyCyrlConnection.ssl_opts_mapping[k]] = v
+                if k in PyCurlConnection.ssl_opts_mapping and v is not None:
+                    self.ssl_opts[PyCurlConnection.ssl_opts_mapping[k]] = v
         else:
             scheme = 'http'
             self.use_ssl = False
