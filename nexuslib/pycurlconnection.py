@@ -213,7 +213,7 @@ class PyCyrlMultiHander(object):
         self.running = True
         self.max_active = max_query
 
-    def query(self, handle, future):
+    async def query(self, handle, future):
         def manage_callback(status, headers, data):
             handle.close()
             future.set_result((status, headers, data))
@@ -227,7 +227,7 @@ class PyCyrlMultiHander(object):
 
         # put the query in the waiting queue, that launch it if possible
         # and wait for the processing to be finished
-        yield from wait((future, self.waiting_handles.put(handle)), loop=self.loop)
+        await wait((future, self.waiting_handles.put(handle)), loop=self.loop)
         return future
 
     def close(self):
@@ -241,12 +241,12 @@ class PyCyrlMultiHander(object):
             ret, num_handles = self.multi.perform()
         return ret, num_handles
 
-    def _try_load_queries(self, wait=True, timeout=1.0):
+    async def _try_load_queries(self, wait=True, timeout=1.0):
         added = 0
         while len(self.handles) < self.max_active:
             try:
                 if wait:
-                    handler = yield from wait_for(self.waiting_handles.get(), timeout, loop=self.loop)
+                    handler = await wait_for(self.waiting_handles.get(), timeout, loop=self.loop)
                 else:
                     handler = self.waiting_handles.get_nowait()
                 # only wait once
@@ -265,7 +265,7 @@ class PyCyrlMultiHander(object):
             if ret > 0:
                 raise ConnectionError("pycurl failed", ret)
 
-    def perform(self, timeout=0.1):
+    async def perform(self, timeout=0.1):
         """
         Loop on waiting handles to process them until they are no more waiting one and all send are finished.
         It's never finished until closed for end of all processing, don't wait for it on loop
@@ -275,9 +275,9 @@ class PyCyrlMultiHander(object):
         while self.running:
             if len(self.handles) == 0:
                 # no activity, just sleep, for new queries
-                yield from self._try_load_queries(True, timeout)
+                await self._try_load_queries(True, timeout)
             else:
-                yield from self._try_load_queries(False)
+                await self._try_load_queries(False)
             if len(self.handles) == 0:
                 continue
             # wait for something to happen
@@ -579,7 +579,7 @@ class PyCyrlConnection(object):
                         future.set_exception(e)
                 break
 
-    def perform_request(self, method, uri, headers=None, params=None, body=None):
+    async def perform_request(self, method, uri, headers=None, params=None, body=None):
         futur_result = Future(loop=self.loop)
         query_iterator = self.perform_async_request(futur_result, method, uri, headers, params, body)
         (next_method,
@@ -590,7 +590,7 @@ class PyCyrlConnection(object):
          ignore) = query_iterator.send(None)
         while True:
             curl_future = Future(loop=self.loop)
-            yield from self._perform_request(method, next_url, next_params, next_body,
+            await self._perform_request(method, next_url, next_params, next_body,
                                                        headers=next_headers,
                                                        ignore=ignore, future=curl_future)
             try:

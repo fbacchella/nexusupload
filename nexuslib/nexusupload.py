@@ -43,7 +43,7 @@ def get_check_cb(rpm_file_name, dest):
     return done_cb
 
 
-def upload(*args, context=None, doop=False):
+async def upload(*args, context=None, doop=False):
     valid_archs=set(['x86_64', 'noarch', 'i686', 'i586', 'i386'])
     major_re = re.compile(""".*(\.|_|-)(rh)?el(?P<version>\d)(u\d)?.*""")
     filename_re = re.compile(""".*?((\.|_|-)(rh)?el(?P<osmajor>\d)(u\d+)?)?(\.centos)?\.(?P<filearch>[_0-9a-z]+)\.rpm""")
@@ -157,7 +157,7 @@ def upload(*args, context=None, doop=False):
                 timeout = None
             else:
                 timeout = 0
-            done, tasks = yield from asyncio.wait(tasks, timeout=timeout, loop=context.loop,
+            done, tasks = await asyncio.wait(tasks, timeout=timeout, loop=context.loop,
                                                     return_when=asyncio.FIRST_COMPLETED)
             for i in done:
                 try:
@@ -165,7 +165,7 @@ def upload(*args, context=None, doop=False):
                 except NexusException:
                     pass
     if len(tasks) != 0:
-        done, tasks = yield from asyncio.wait(tasks, timeout=None, loop=context.loop,
+        done, tasks = await asyncio.wait(tasks, timeout=None, loop=context.loop,
                                               return_when=asyncio.ALL_COMPLETED)
         for i in done:
             try:
