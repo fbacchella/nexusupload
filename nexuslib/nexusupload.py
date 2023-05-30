@@ -133,11 +133,13 @@ async def upload(*args, context=None, doop=False):
         else:
             rpm_type = 'Packages'
             arch = "/%s" % arch
-        if centos_version == None:
+        if centos_version is None:
             print('invalid rpm "%s"' % rpm_file_name, file=sys.stderr)
             continue
         if len(centos_version) == 0:
-            centos_version = (5, 6, 7, 8, 9)
+            centos_version = context.current_config['connection']['majors']
+        elif centos_version not in context.current_config['connection']['majors']:
+            continue
         for v in centos_version:
             dest = '/%s/%s%s/%s' % (rpm_type, v, arch, basename(rpm_file_name))
             if doop:
@@ -186,6 +188,7 @@ def main():
     parser.add_option("-k", "--kerberos", dest="kerberos", help="Uses kerberos authentication", action='store_true')
     parser.add_option("-U", "--url", dest="url", help="URL to connect to", default=None)
     parser.add_option("-n", "--noop", dest="doop", help="Check, don't upload", default=True, action='store_false')
+    parser.add_option("-m", "--majors", dest="majors", help="The major to upload versions", default=[], action='append', type="int")
 
     (options, args) = parser.parse_args()
 

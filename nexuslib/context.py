@@ -29,7 +29,8 @@ class Context(object):
                    'passwordfile': ['connection', 'passwordfile'],
                    'kerberos': ['connection', 'kerberos'],
                    'url': ['connection', 'url'],
-                   'timeout': ['connection', 'timeout']}
+                   'timeout': ['connection', 'timeout'],
+                   'majors': ['connection', 'majors']}
 
     # default values for connection
     default_settings = {
@@ -48,6 +49,7 @@ class Context(object):
             'http_version': None,
             'host': 'localhost',
             'port': 80,
+            'majors': (5, 6, 7, 8, 9),
         },
         'logging': {
             'filters': 'header,data,text',
@@ -93,13 +95,22 @@ class Context(object):
         # Read the configuration
         for section in config.sections():
             for k,v in config.items(section):
-                if k in Context.boolean_options[section]:
+                if k == 'majors':
+                    try:
+                        self.current_config[section][k] = list(map(lambda x: int(x), v.split(',')))
+                    except ValueError:
+                        print('Not a list of majors: %s', v)
+                        return
+                elif k in Context.boolean_options[section]:
                     self.current_config[section][k] = config.getboolean(section, k)
                 elif k in Context.integer_options[section]:
                     self.current_config[section][k] = config.getint(section, k)
                 else:
                     self.current_config[section][k] = v
 
+        # Remove majors option if it's empty
+        if len(kwargs['majors']) == 0:
+            kwargs.pop('majors')
         # extract values from explicit arguments or else from config file
         for arg_name, arg_destination in Context.arg_options.items():
             if arg_name in kwargs:
