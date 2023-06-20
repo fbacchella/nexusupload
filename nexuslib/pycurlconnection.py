@@ -566,7 +566,7 @@ class PyCurlConnection(object):
                 status, headers_out, data = future_result()
             except Exception as e:
                 if method == 'HEAD' and e.status_code == 404:
-                    future.set_result(False)
+                    future.set_result((False, e.status_code))
                     break
                 retry = False
                 if isinstance(e, ConnectionError):
@@ -584,12 +584,12 @@ class PyCurlConnection(object):
                     break
             else:
                 if method == 'HEAD':
-                    future.set_result(200 <= status < 300)
+                    future.set_result((200 <= status < 300, status))
                 else:
                     try:
                         #if data:
                         #    data = self.deserializer.loads(data, headers_out.get('content-type'))
-                        future.set_result(data)
+                        future.set_result((data, status))
                     except Exception as e:
                         future.set_exception(e)
                 break

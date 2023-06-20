@@ -11,6 +11,28 @@ import rpmfile
 import asyncio
 
 
+def get_head_cb(doop, rpm_file_name, dest, executor):
+    def cb(f):
+        if doop and f.result()[1] == 404:
+            print("Will upload", rpm_file_name, "at", dest)
+            # Don't use the 'with' construct
+            rpm_file = open(rpm_file_name, 'rb')
+            executor.request('PUT', dest, get_done_cb(dest, rpm_file), body=rpm_file, headers={'Content-Type': 'application/x-rpm'})
+        elif not doop:
+            ex = f.exception()
+            if ex is None:
+                result = f.result()[0]
+                # try with HEAD mean 200 -> already exists
+                if result:
+                    print(rpm_file_name, '->', dest, 'already exists')
+                else:
+                    print(rpm_file_name, '->', dest, 'to be uploaded')
+            else:
+                print(dest, 'failed with', ex)
+
+    return cb
+
+
 def get_done_cb(dest, rpm_file):
     def done_cb(f):
         ex = f.exception()
@@ -25,28 +47,47 @@ def get_done_cb(dest, rpm_file):
             print(dest, ex2)
     return done_cb
 
+class Executor(object):
+    def __init__(self, context):
+        super(Executor, self).__init__()
+        self.loop = context.loop
+        self.tasks = set()
+        self.nexuscnx = context.nexuscnx
 
-def get_check_cb(rpm_file_name, dest):
-    def done_cb(f):
-        ex = f.exception()
-        if ex is None:
-            result = f.result()
-            # try with HEAD mean 200 -> already exists
-            if result:
-                print(rpm_file_name, '->', dest, 'already exists')
-            else:
-                print(rpm_file_name, '->', dest, 'to be uploaded')
-        else:
-            print(dest, 'failed with', ex)
-    return done_cb
+    def request(self, method, url, callback=None, *args, **kwargs):
+        request = self.nexuscnx.perform_request(method, url, *args, **kwargs)
+        self.perform(request, callback)
+
+    async def request_cb(self, next_cb, *args, **kwargs):
+        def callback():
+            self.perform(request, next_cb)
+        request = self.nexuscnx.perform_request(*args, **kwargs)
+        return (request, callback)
+
+    def perform(self, request,  callback):
+        op_future = asyncio.ensure_future(request, loop=self.loop)
+        if callback is not None:
+            op_future.add_done_callback(callback)
+        self.tasks.add(op_future)
+
+    async def wait_finished(self):
+        while len(self.tasks) != 0:
+            done, waitingtasks = await asyncio.wait(self.tasks, timeout=None, loop=self.loop,
+                                             return_when=asyncio.ALL_COMPLETED)
+            for i in done:
+                self.tasks.remove(i)
+                try:
+                    i.result()
+                except NexusException:
+                    pass
 
 
 async def upload(*args, context=None, doop=False):
+    executor = Executor(context)
     valid_archs=set(['x86_64', 'noarch', 'i686', 'i586', 'i386'])
     major_re = re.compile(""".*(\.|_|-)(rh)?el(?P<version>\d)(u\d)?.*""")
     filename_re = re.compile(""".*?((\.|_|-)(rh)?el(?P<osmajor>\d)(u\d+)?)?(\.centos)?\.(?P<filearch>[_0-9a-z]+)\.rpm""")
     rpm_info_re = re.compile("""(?P<version>\d+)|debuginfo|(?P<arch>[_0-9a-z]+)""")
-    tasks = set()
     for rpm_file_info in args:
         rpm_file_infos = rpm_file_info.split(';')
         rpm_file_name = rpm_file_infos[0]
@@ -64,7 +105,7 @@ async def upload(*args, context=None, doop=False):
                 add_version = rpm_info_match.group('version')
                 new_filearch = rpm_info_match.group('arch')
                 if add_version is not None:
-                    centos_version.append(add_version)
+                    centos_version.append(int(add_version))
                 elif new_filearch is not None:
                     filearch = new_filearch
                 elif i == 'debuginfo':
@@ -92,7 +133,7 @@ async def upload(*args, context=None, doop=False):
                     for try_major in ('version', 'release'):
                         major_match = major_re.fullmatch(rpm.headers[try_major])
                         if major_match is not None:
-                            centos_version = (major_match.group('version'), )
+                            centos_version = (int(major_match.group('version')), )
                             break
                 # The rhel version is not always in the release or the version name
                 # Sometimes, it's in the file name
@@ -138,40 +179,13 @@ async def upload(*args, context=None, doop=False):
             continue
         if len(centos_version) == 0:
             centos_version = context.current_config['connection']['majors']
-        elif centos_version not in context.current_config['connection']['majors']:
-            continue
         for v in centos_version:
+            if v not in context.current_config['connection']['majors']:
+                continue
             dest = '/%s/%s%s/%s' % (rpm_type, v, arch, basename(rpm_file_name))
-            if doop:
-                rpm_file = open(rpm_file_name, 'rb')
-                request = context.nexuscnx.perform_request('PUT', dest,
-                                                           body=rpm_file, headers={'Content-Type': 'application/x-rpm'})
-                done_cb = get_done_cb(dest, rpm_file)
-            else:
-                request = context.nexuscnx.perform_request('HEAD', dest)
-                done_cb = get_check_cb(rpm_file_name, dest)
-            op_future = asyncio.ensure_future(request, loop=context.loop)
-            op_future.add_done_callback(done_cb)
-            tasks.add(op_future)
-            if len(tasks) > 10:
-                timeout = None
-            else:
-                timeout = 0
-            done, tasks = await asyncio.wait(tasks, timeout=timeout, loop=context.loop,
-                                                    return_when=asyncio.FIRST_COMPLETED)
-            for i in done:
-                try:
-                    i.result()
-                except NexusException:
-                    pass
-    if len(tasks) != 0:
-        done, tasks = await asyncio.wait(tasks, timeout=None, loop=context.loop,
-                                              return_when=asyncio.ALL_COMPLETED)
-        for i in done:
-            try:
-                i.result()
-            except NexusException:
-                pass
+            executor.request('HEAD', dest, get_head_cb(doop, rpm_file_name, dest, executor))
+
+    await executor.wait_finished()
 
 
 def main():

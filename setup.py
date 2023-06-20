@@ -38,8 +38,6 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Classifier: Operating System :: OS Independent",
         "Environment :: Console",
-        "Programming Language :: Python :: 3.4",
-        "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: Implementation :: CPython",
     ],
