@@ -85,8 +85,8 @@ class Executor(object):
 async def upload(*args, context=None, doop=False):
     executor = Executor(context)
     valid_archs=set(['x86_64', 'noarch', 'i686', 'i586', 'i386'])
-    major_re = re.compile(""".*(\.|_|-)(rh)?el(?P<version>\d)(u\d)?.*""")
-    filename_re = re.compile(""".*?((\.|_|-)(rh)?el(?P<osmajor>\d)(u\d+)?)?(\.centos)?\.(?P<filearch>[_0-9a-z]+)\.rpm""")
+    major_re = re.compile(""".*(\.|_|-)(rh)?el(?P<version>\d+)(u\d)?.*""")
+    filename_re = re.compile(""".*?((\.|_|-)(rh)?el(?P<osmajor>\d+)(u\d+)?)?(\.centos)?\.(?P<filearch>[_0-9a-z]+)\.rpm""")
     rpm_info_re = re.compile("""(?P<version>\d+)|debuginfo|(?P<arch>[_0-9a-z]+)""")
     for rpm_file_info in args:
         rpm_file_infos = rpm_file_info.split(';')
